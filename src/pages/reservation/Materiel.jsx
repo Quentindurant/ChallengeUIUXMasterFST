@@ -3,6 +3,9 @@ import Card from '../../components/ui/Card.jsx'
 import Checkbox from '../../components/ui/Checkbox.jsx'
 import { focusRing } from '../../components/ui/styles.js'
 import { useDemande } from '../../context/DemandeContext.jsx'
+import { api } from '../../data/api.js'
+import { formaterDateCourte } from '../../data/dates.js'
+import useChargement from '../../hooks/useChargement.js'
 import useTitre from '../../hooks/useTitre.js'
 import { materiel, options } from '../../data/mock.js'
 
@@ -12,8 +15,12 @@ export default function Materiel() {
   const { demande, update } = useDemande()
   useTitre('Matériel (étape 2 sur 6)')
 
+  // Ce que les autres demandes ont déjà pris ce jour-là : le stock affiché est ce qui reste.
+  const reserve = useChargement(() => api.stockReserve(demande.date), [demande.date]).donnees ?? {}
+  const dispo = (m) => Math.max(0, m.stock - (reserve[m.id] ?? 0))
+
   const changerQuantite = (m, n) => {
-    const borne = Math.min(m.stock, Math.max(0, Number.isNaN(n) ? 0 : n))
+    const borne = Math.min(dispo(m), Math.max(0, Number.isNaN(n) ? 0 : n))
     update({ materiel: { ...demande.materiel, [m.id]: borne } })
   }
 
@@ -34,8 +41,13 @@ export default function Materiel() {
               <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                 <div>
                   <label htmlFor={champId} className="font-medium">
-                    {m.nom} ({m.stock} dispo)
+                    {m.nom} ({dispo(m)} dispo)
                   </label>
+                  {reserve[m.id] > 0 && (
+                    <p className="text-xs text-slate-600">
+                      {reserve[m.id]} déjà réservés le {formaterDateCourte(demande.date)}, sur {m.stock}
+                    </p>
+                  )}
                   {m.prixJour > 0 && <p className="text-slate-600">{m.prixJour} € / jour</p>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -52,7 +64,7 @@ export default function Materiel() {
                     id={champId}
                     type="number"
                     min={0}
-                    max={m.stock}
+                    max={dispo(m)}
                     value={quantite}
                     onChange={(e) => changerQuantite(m, parseInt(e.target.value, 10))}
                     className={`w-16 rounded-md border border-slate-300 px-2 py-1 text-center ${focusRing}`}
@@ -61,7 +73,7 @@ export default function Materiel() {
                     type="button"
                     className={boutonQuantite}
                     onClick={() => changerQuantite(m, quantite + 1)}
-                    disabled={quantite >= m.stock}
+                    disabled={quantite >= dispo(m)}
                     aria-label={`Ajouter un élément : ${m.nom.toLowerCase()}`}
                   >
                     +

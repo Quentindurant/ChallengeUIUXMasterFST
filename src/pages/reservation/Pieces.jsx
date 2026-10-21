@@ -114,6 +114,17 @@ export default function Pieces() {
   const retirer = (id) => update({ pieces: demande.pieces.filter((p) => p.id !== id) })
   const changerBuvette = (champ, valeur) => update({ buvette: { ...buvette, [champ]: valeur } })
 
+  // Les pièces peuvent arriver plus tard (depuis le suivi), pas l'engagement buvette : il n'y a pas d'autre écran pour signer.
+  const raison = !demande.evenement.buvette
+    ? null
+    : !buvette.conditions && !buvette.signee
+      ? 'Avec buvette : cochez les conditions et signez pour continuer.'
+      : !buvette.conditions
+        ? "Avec buvette : cochez « J'ai lu les conditions » pour continuer."
+        : !buvette.signee
+          ? 'Avec buvette : signez dans le cadre pour continuer.'
+          : null
+
   return (
     <div className="grid gap-6 md:grid-cols-[1fr_280px]">
       <section className="min-w-0 space-y-4">
@@ -172,7 +183,7 @@ export default function Pieces() {
           </Card>
         )}
       </section>
-      <RecapDemande suivant="/reservation/envoi" libelle="Continuer" afficherPieces />
+      <RecapDemande suivant="/reservation/envoi" libelle="Continuer" disabled={Boolean(raison)} raison={raison} afficherPieces />
     </div>
   )
 }

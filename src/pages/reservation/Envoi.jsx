@@ -4,6 +4,7 @@ import Button from '../../components/ui/Button.jsx'
 import Card from '../../components/ui/Card.jsx'
 import { focusRing } from '../../components/ui/styles.js'
 import { useDemande } from '../../context/DemandeContext.jsx'
+import { api, memoriserDossier } from '../../data/api.js'
 import { calculerTotal } from '../../data/calculs.js'
 import { formaterDate, formaterHeure } from '../../data/dates.js'
 import { materiel, piecesRequises, salles } from '../../data/mock.js'
@@ -13,6 +14,7 @@ export default function Envoi() {
   const { demande, update } = useDemande()
   const navigate = useNavigate()
   const [infoCaution, setInfoCaution] = useState(false)
+  const [envoi, setEnvoi] = useState({ enCours: false, erreur: null })
   useTitre('Envoi (étape 6 sur 6)')
 
   const salle = salles.find((s) => s.id === demande.salleId)
@@ -35,9 +37,17 @@ export default function Envoi() {
     ['Pièces', `${demande.pieces.length} sur ${piecesRequises.length}`],
   ]
 
-  const envoyer = () => {
-    update({ numeroDossier: 'RES-2026-0142' })
-    navigate('/confirmation')
+  // Le serveur revérifie tout (créneau, stock, champs) : un refus s'affiche sous le bouton.
+  const envoyer = async () => {
+    setEnvoi({ enCours: true, erreur: null })
+    try {
+      const { numero } = await api.envoyer(demande)
+      memoriserDossier(numero)
+      update({ numeroDossier: numero })
+      navigate('/confirmation')
+    } catch (e) {
+      setEnvoi({ enCours: false, erreur: e.message })
+    }
   }
 
   return (
@@ -86,13 +96,24 @@ export default function Envoi() {
         </button>
         {infoCaution && (
           <p id="info-caution" className="mt-2 rounded-md bg-slate-100 p-3 text-xs text-slate-700">
-            Une caution de 1 500 € vous sera demandée à la remise des clés. Elle n'est pas encaissée et vous est rendue
+            Une caution de {(salle?.caution ?? 500).toLocaleString('fr-FR')} € vous sera demandée à la remise des clés. Elle n'est pas encaissée et vous est rendue
             après l'état des lieux.
           </p>
         )}
-        <Button full onClick={envoyer} disabled={!salle} aria-describedby={salle ? undefined : 'raison-envoi'} className="mt-4">
-          Envoyer ma demande
+        <Button
+          full
+          onClick={envoyer}
+          disabled={!salle || envoi.enCours}
+          aria-describedby={!salle ? 'raison-envoi' : envoi.erreur ? 'erreur-envoi' : undefined}
+          className="mt-4"
+        >
+          {envoi.enCours ? 'Envoi en cours…' : 'Envoyer ma demande'}
         </Button>
+        {envoi.erreur && (
+          <p id="erreur-envoi" role="alert" className="mt-2 text-xs text-red-700">
+            {envoi.erreur}
+          </p>
+        )}
         {!salle && (
           <p id="raison-envoi" className="mt-2 text-xs text-amber-800">
             Choisissez une salle à l'étape Salle pour envoyer votre demande.

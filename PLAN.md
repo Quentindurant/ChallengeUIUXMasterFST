@@ -1,8 +1,10 @@
 # Plan de réalisation — démo front Lacroix-Falgarde
 
 Objectif : une démo **cliquable de bout en bout** du parcours de réservation, fidèle au wireframe Balsamiq
-[UserFlow](https://balsamiq.cloud/siqzvs5/p9fetpl/rE50F). Front uniquement : pas d'API, pas de base de données,
-pas de vraie authentification. Tout vient de `src/data/mock.js` et vit en mémoire (`DemandeContext`).
+[UserFlow](https://balsamiq.cloud/siqzvs5/p9fetpl/rE50F). Pas de vraie authentification.
+La demande en cours de saisie vit en mémoire (`DemandeContext`) ; une fois envoyée, elle est enregistrée dans une base
+**SQLite locale** (`server/reservations.db`), que lisent le suivi, le back-office et le planning.
+Le catalogue (salles, matériel, pièces requises) reste dans `src/data/mock.js`, partagé par le front et le serveur.
 
 **Règle d'or : le parcours principal doit fonctionner avant de peaufiner quoi que ce soit.**
 
@@ -14,6 +16,8 @@ pas de vraie authentification. Tout vient de `src/data/mock.js` et vit en mémoi
 | Tailwind CSS v4 | Mise en forme directement dans le JSX, pas de fichier CSS à maintenir |
 | React Router | Une URL par écran, le stepper est une simple suite de liens |
 | Context React | Une seule demande en cours, partagée entre les étapes |
+| SQLite (`node:sqlite`, intégré à Node ≥ 22.13) | Demandes, matériel réservé, pièces et messages persistants, sans dépendance à installer |
+| API JSON dans Vite (`server/plugin.js`) | Servie sous `/api` par `npm run dev` et `npm run preview` : une seule commande à lancer |
 
 Pas de librairie de composants ni de gestion de formulaires : les écrans sont simples, du HTML + Tailwind suffit.
 
@@ -30,16 +34,38 @@ Pas de librairie de composants ni de gestion de formulaires : les écrans sont s
 src/
   App.jsx                  routes
   context/DemandeContext   état de la demande : useDemande() → { demande, update, reset }
-  data/mock.js             données fictives
+  data/mock.js             catalogue : salles, matériel, options, profils, pièces requises
+  data/api.js              appels à l'API (/api)
   data/calculs.js          calcul du total
   data/dates.js            dates et heures au format français
   hooks/useTitre.js        titre de l'onglet, page par page
-  components/              Layout (header), Stepper, RecapDemande
+  hooks/useChargement.js   chargement d'une ressource de l'API
+  components/              Layout (header), Stepper, RecapDemande, Statut
   pages/
     Accueil, Recherche, Confirmation, Suivi
     reservation/           Salle, Materiel, Vous, Evenement, Pieces, Envoi
-    admin/AdminDemandes    back-office mairie
+    admin/                 AdminLayout (menu), AdminDemandes, AdminPlanning
+server/
+  db.js                    schéma SQLite + jeu de départ (12 demandes, novembre-décembre 2026)
+  demandes.js              règles : validations, créneaux, stock, contrôles automatiques, statuts
+  api.js                   routes HTTP JSON
+  plugin.js                branche l'API dans Vite
+  reset.js                 npm run db:reset
 ```
+
+## API (`/api`)
+
+| Méthode | Route | Rôle |
+| --- | --- | --- |
+| GET | `/salles/:id/disponibilites` | Jours déjà pris pour une salle (toute demande non refusée) |
+| GET | `/stock?date=AAAA-MM-JJ` | Matériel déjà réservé ce jour-là |
+| GET | `/demandes[?email=…]` | Liste complète, ou les demandes d'un e-mail (suivi) |
+| POST | `/demandes` | Envoi : revérifie salle, date libre, stock, nom, e-mail, buvette ; renvoie le numéro |
+| GET | `/demandes/:numero` | Détail : matériel, pièces, messages, contrôles automatiques |
+| PATCH | `/demandes/:numero` | Changer le statut (accord refusé si pièces ou buvette incomplètes) |
+| POST | `/demandes/:numero/pieces` | Ajouter une pièce (le dossier complet repasse « À instruire ») |
+| POST | `/demandes/:numero/messages` | Message de l'habitant ou de la mairie |
+| GET | `/planning` | Réservations non refusées, pour le calendrier des salles |
 
 ## Écrans → routes
 
@@ -55,7 +81,8 @@ src/
 | 8 | Envoi (récapitulatif) | `/reservation/envoi` | `reservation/Envoi.jsx` |
 | 9 | Demande envoyée | `/confirmation` | `pages/Confirmation.jsx` |
 | 10 | Suivi de la demande | `/mes-demandes` | `pages/Suivi.jsx` |
-| 11 | Back-office mairie | `/admin` | `admin/AdminDemandes.jsx` |
+| 11 | Back-office mairie | `/admin` (`?dossier=RES-…` ouvre un dossier) | `admin/AdminDemandes.jsx` |
+| 12 | Calendrier des salles (planning global) | `/admin/planning` | `admin/AdminPlanning.jsx` |
 
 ## Étapes de réalisation
 
@@ -89,8 +116,18 @@ Les lots sont indépendants : quatre personnes peuvent travailler en parallèle 
 - Accessibilité de base : `label` sur chaque champ, focus visible, contrastes.
 - Un **scénario de démo** écrit (Julien, Foyer rural, 21 novembre 2026, avec buvette) qu'on répète deux fois avant de présenter.
 
+### Étape 4 — Persistance et planning
+- **SQLite** : l'envoi enregistre la demande ; le calendrier grise les jours réellement pris, le matériel affiche
+  le stock restant à la date, et le serveur refuse un créneau ou un stock déjà pris entre-temps.
+- **Suivi** : lit la base (par e-mail si connecté, sinon le dernier dossier envoyé ou un numéro saisi) ;
+  pièce ajoutée et messages enregistrés.
+- **Back-office** : demandes et détail complet depuis la base, contrôles automatiques calculés (créneau, capacité, stock),
+  réponses de la mairie, changement de statut avec message automatique au demandeur.
+- **Calendrier des salles** : grille salles × jours du mois, couleur par état, clic → dossier ; liste du mois en dessous.
+
 ### Hors périmètre
-Vraie authentification, persistance, envoi d'e-mails ou de SMS, export Excel réel, calendrier et stock côté mairie
+Vraie authentification (l'API est ouverte, c'est une démo locale), envoi d'e-mails ou de SMS, téléversement réel
+des fichiers (seul le nom est gardé), export Excel réel, écrans stock / salles / usagers côté mairie
 (entrées de menu sans contenu).
 
 ## Conventions
@@ -106,16 +143,18 @@ fonctionne, le suivi et le back-office affichent le dossier, et tout reste lisib
 
 Parcours de Julien, habitant : Foyer rural, samedi 21 novembre 2026, 30 personnes, 5 tables et 8 bancs, avec buvette.
 À répéter deux fois avant de présenter. Préparer deux petits fichiers sur le bureau (`identite.pdf`, `domicile.pdf`)
-et un troisième pour la fin (`assurance.pdf`). Recharger la page avant de commencer : tout est en mémoire.
+et un troisième pour la fin (`assurance.pdf`). Avant de commencer : `npm run db:reset` (remet les 12 demandes
+de départ et efface celles des répétitions), puis recharger la page.
 
 **Côté habitant**
 
 1. **Accueil** (`/`) : cliquer **Réserver une salle**.
 2. **Recherche** : la date (21/11/2026), les 30 participants et le profil Habitant sont déjà remplis ; le montrer,
    puis cliquer **Voir** sur la carte *Foyer rural*.
-3. **Salle** : montrer les jours grisés (7, 8, 14, 15, 28 et 29 novembre) et le 21 surligné en jaune.
+3. **Salle** : montrer les jours grisés, déjà réservés en base (7, 8, 14, 15, 28 et 29 novembre), et le 21 surligné en jaune.
    Cliquer **21**, puis **Continuer**.
 4. **Matériel** : *Tables intérieures* → saisir **5** (ou cliquer cinq fois sur **+**) ; *Bancs* → saisir **8**.
+   Faire remarquer « 12 dispo » sur les tables : 6 sont déjà prises ce jour-là par une autre demande.
    L'encart affiche « 5 tables intérieures, 8 bancs » et le total 250 €. Cliquer **Continuer**.
 5. **Vous** : faire remarquer que **Continuer** est grisé avec la phrase « Renseignez votre nom et votre e-mail… ».
    Cliquer **Se connecter** (dans la page) : « Connecté en tant que Julien Particulier ». Cliquer **Continuer**.
@@ -123,25 +162,34 @@ et un troisième pour la fin (`assurance.pdf`). Recharger la page avant de comme
    *Buvette ?* → **Oui**. Cliquer **Continuer**.
 7. **Pièces** : *Pièce d'identité* → **Choisir un fichier** → `identite.pdf` ;
    *Justificatif de domicile* → **Choisir un fichier** → `domicile.pdf` ; laisser l'attestation d'assurance vide.
-   Bloc *Buvette* : cocher **J'ai lu les conditions…**, signer dans le cadre. L'encart indique « Pièces : 2 sur 3 ».
+   Bloc *Buvette* : montrer que **Continuer** est grisé tant que ce n'est pas fait ; ouvrir **Consulter le formulaire (PDF)**,
+   cocher **J'ai lu les conditions…**, signer dans le cadre. L'encart indique « Pièces : 2 sur 3 ».
    Cliquer **Continuer**.
 8. **Envoi** : relire le récapitulatif (samedi 21 novembre 2026, de 10 h à 23 h · avec buvette · 2 sur 3),
    ouvrir **Info caution**, puis cliquer **Envoyer ma demande**.
 9. **Confirmation** : « N° de dossier RES-2026-0142 ». Cliquer **Suivre ma demande**.
-10. **Mes demandes** : montrer « Pièce manquante : attestation d'assurance » et le message de la mairie.
+10. **Mes demandes** : montrer « Pièce manquante : attestation d'assurance » et le message automatique de la mairie.
     Écrire « Je vous l'envoie ce soir. » puis **Envoyer**. Cliquer **Voir côté mairie**.
 
 **Côté mairie — fin A : refus**
 
-11. **Back-office** : cliquer l'onglet **Pièces manquantes**, puis la ligne **Julien (particulier)**.
-12. Le détail montre les contrôles automatiques, « 2/3 Attestation d'assurance » et **Accorder (dossier incomplet)** grisé.
-13. Cliquer **Refuser** : « Demande n° 1 refusée. » ; la ligne apparaît dans l'onglet **Refusées**.
+11. **Back-office** : cliquer l'onglet **Pièces manquantes**, puis la ligne **RES-2026-0142 · Julien Particulier**.
+12. Le détail montre les contrôles automatiques, l'attestation d'assurance « Manquante », le message de Julien
+    et **Accorder (dossier incomplet)** grisé.
+13. Cliquer **Refuser** : « Demande RES-2026-0142 refusée. » ; la ligne passe dans l'onglet **Refusées**,
+    et le 21 novembre redevient libre pour le Foyer rural.
 
 **Côté mairie — fin B : accord** (à la place des étapes 11 à 13)
 
-11. Dans **Mes demandes**, cliquer **Ajouter la pièce** → `assurance.pdf` : le statut passe à « Dossier complet ».
+11. Dans **Mes demandes**, cliquer **Ajouter la pièce** → `assurance.pdf` : le statut passe à « Instruction en cours ».
     Cliquer **Voir côté mairie**.
 12. **Back-office** : la demande de Julien est dans l'onglet **À traiter** (pièces « Complet ») ; cliquer sa ligne.
-13. Cliquer **Accorder** : « Demande n° 1 accordée. » ; la ligne apparaît dans l'onglet **Accordées**.
+13. Cliquer **Accorder** : « Demande RES-2026-0142 accordée. » ; la ligne passe dans l'onglet **Accordées**
+    et un message de la mairie est ajouté aux échanges (visible dans **Mes demandes**).
 
-Pour rejouer le scénario, recharger la page (F5) : la demande repart de zéro.
+**Planning global** (après l'une des deux fins)
+
+14. Dans le menu du back-office, cliquer **Calendrier des salles** : novembre 2026 s'affiche, une ligne par salle.
+    Montrer la légende et la case « JP » du Foyer rural le 21 (verte si accordée), puis cliquer dessus : le dossier de Julien s'ouvre.
+
+Pour rejouer le scénario : `npm run db:reset`, puis recharger la page (F5).

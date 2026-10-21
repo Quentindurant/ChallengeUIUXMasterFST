@@ -3,8 +3,11 @@ import RecapDemande from '../../components/RecapDemande.jsx'
 import Card from '../../components/ui/Card.jsx'
 import { focusRing } from '../../components/ui/styles.js'
 import { useDemande } from '../../context/DemandeContext.jsx'
+import { api } from '../../data/api.js'
+import { aujourdhui, versIso } from '../../data/dates.js'
+import { salles } from '../../data/mock.js'
+import useChargement from '../../hooks/useChargement.js'
 import useTitre from '../../hooks/useTitre.js'
-import { joursIndisponibles, salles } from '../../data/mock.js'
 
 const joursSemaine = [
   { court: 'L', long: 'lundi' },
@@ -16,17 +19,7 @@ const joursSemaine = [
   { court: 'D', long: 'dimanche' },
 ]
 
-const deuxChiffres = (n) => String(n).padStart(2, '0')
-
-// 'AAAA-MM-JJ' en heure locale : toISOString() décalerait la date selon le fuseau.
-const versChaine = (annee, mois, jour) => `${annee}-${deuxChiffres(mois + 1)}-${deuxChiffres(jour)}`
-
-function aujourdhui() {
-  const d = new Date()
-  return versChaine(d.getFullYear(), d.getMonth(), d.getDate())
-}
-
-function Calendrier({ selection, onChoisir }) {
+function Calendrier({ selection, occupees, onChoisir }) {
   // Sans date choisie (champ vidé dans la recherche), le calendrier s'ouvre sur le mois en cours.
   const [annee, moisSel] = (selection || aujourdhui()).split('-').map(Number)
   const [vue, setVue] = useState({ annee, mois: moisSel - 1 })
@@ -64,8 +57,8 @@ function Calendrier({ selection, onChoisir }) {
         {Array.from({ length: decalage }, (_, i) => <span key={`vide-${i}`} />)}
         {Array.from({ length: nbJours }, (_, i) => {
           const jour = i + 1
-          const date = versChaine(vue.annee, vue.mois, jour)
-          const indisponible = joursIndisponibles.includes(date) || date < today
+          const date = versIso(vue.annee, vue.mois, jour)
+          const indisponible = occupees.includes(date) || date < today
           const choisi = date === selection
           const etat = indisponible ? 'indisponible' : choisi ? 'sélectionné' : 'disponible'
           return (
@@ -98,7 +91,14 @@ export default function Salle() {
   const salle = salles.find((s) => s.id === demande.salleId)
   useTitre('Salle (étape 1 sur 6)')
 
-  const dateIndisponible = demande.date && (joursIndisponibles.includes(demande.date) || demande.date < aujourdhui())
+  // Jours déjà pris dans SQLite (toute demande non refusée bloque le créneau).
+  const disponibilites = useChargement(
+    () => (demande.salleId ? api.datesOccupees(demande.salleId) : Promise.resolve([])),
+    [demande.salleId],
+  )
+  const occupees = disponibilites.donnees ?? []
+
+  const dateIndisponible = demande.date && (occupees.includes(demande.date) || demande.date < aujourdhui())
   const raison = !salle
     ? 'Choisissez une salle pour continuer.'
     : !demande.date
@@ -127,7 +127,12 @@ export default function Salle() {
             </ul>
           </>
         )}
-        <Calendrier selection={demande.date} onChoisir={(date) => update({ date })} />
+        {disponibilites.erreur && (
+          <p role="alert" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Disponibilités non chargées : {disponibilites.erreur}
+          </p>
+        )}
+        <Calendrier selection={demande.date} occupees={occupees} onChoisir={(date) => update({ date })} />
       </section>
       <RecapDemande suivant="/reservation/materiel" libelle="Continuer" disabled={Boolean(raison)} raison={raison} />
     </div>

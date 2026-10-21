@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Base SQLite locale de la démo (recréée au premier lancement)
+server/*.db
+server/*.db-wal
+server/*.db-shm

@@ -12,6 +12,8 @@ import Envoi from './pages/reservation/Envoi.jsx'
 import Confirmation from './pages/Confirmation.jsx'
 import Suivi from './pages/Suivi.jsx'
 import AdminDemandes from './pages/admin/AdminDemandes.jsx'
+import AdminLayout from './pages/admin/AdminLayout.jsx'
+import AdminPlanning from './pages/admin/AdminPlanning.jsx'
 
 export default function App() {
   return (
@@ -29,7 +31,10 @@ export default function App() {
         </Route>
         <Route path="confirmation" element={<Confirmation />} />
         <Route path="mes-demandes" element={<Suivi />} />
-        <Route path="admin" element={<AdminDemandes />} />
+        <Route path="admin" element={<AdminLayout />}>
+          <Route index element={<AdminDemandes />} />
+          <Route path="planning" element={<AdminPlanning />} />
+        </Route>
       </Route>
     </Routes>
   )
